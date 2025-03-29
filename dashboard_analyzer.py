@@ -602,19 +602,30 @@ def analyze_and_summarize_post_performance(df):
     # 3. Top Performing Posts
     top_n = 5 
     top_by_reach = df_analyzed.nlargest(top_n, 'Reach')
-    top_by_likes = df_analyzed.nlargest(top_n, 'Likes')
+    # We will focus on Engagement Rate for Top/Bottom analysis sent to LLM
     top_by_engagement_rate = df_analyzed.nlargest(top_n, 'EngagementRate')
+    # Add Bottom 5 by Engagement Rate
+    # Filter out posts with 0 reach before finding the smallest ER to avoid misleading results
+    bottom_by_engagement_rate = df_analyzed[df_analyzed['Reach'] > 0].nsmallest(top_n, 'EngagementRate') 
 
     analysis_summary.append(f"\n- Top {top_n} Posts by Reach:")
     for idx, row in top_by_reach.iterrows():
         pub_time = row['PublishTime'].strftime('%m-%d %H:%M') if pd.notna(row['PublishTime']) else 'N/A'
-        analysis_summary.append(f"  - {pub_time} ({row['PostType']}): {row['Reach']} reach")
-        # Optionally add Permalink: row['Permalink']
+        # Include key metrics for Reach leaders as well
+        analysis_summary.append(f"  - {pub_time} ({row['PostType']}): Reach={row['Reach']}, Likes={row['Likes']}, Comments={row['Comments']}, Saves={row['Saves']}, ER={row['EngagementRate']:.2f}%")
 
     analysis_summary.append(f"\n- Top {top_n} Posts by Engagement Rate:")
     for idx, row in top_by_engagement_rate.iterrows():
         pub_time = row['PublishTime'].strftime('%m-%d %H:%M') if pd.notna(row['PublishTime']) else 'N/A'
-        analysis_summary.append(f"  - {pub_time} ({row['PostType']}): {row['EngagementRate']:.2f}% ER")
+        # Add detailed metrics
+        analysis_summary.append(f"  - {pub_time} ({row['PostType']}): ER={row['EngagementRate']:.2f}%, Reach={row['Reach']}, Likes={row['Likes']}, Comments={row['Comments']}, Saves={row['Saves']}")
+
+    # Add Bottom 5 posts section
+    analysis_summary.append(f"\n- Bottom {top_n} Posts by Engagement Rate (Non-Zero Reach):")
+    for idx, row in bottom_by_engagement_rate.iterrows():
+        pub_time = row['PublishTime'].strftime('%m-%d %H:%M') if pd.notna(row['PublishTime']) else 'N/A'
+        # Add detailed metrics
+        analysis_summary.append(f"  - {pub_time} ({row['PostType']}): ER={row['EngagementRate']:.2f}%, Reach={row['Reach']}, Likes={row['Likes']}, Comments={row['Comments']}, Saves={row['Saves']}")
 
     # 4. Performance by Post Type
     analysis_summary.append("\n- Average Performance by Post Type:")
