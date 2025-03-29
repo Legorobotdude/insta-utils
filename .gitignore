@@ -30,6 +30,8 @@ Thumbs.db
 unfollowers.html
 *.zip
 connections/
+*.png
+follower_history.json
 
 # Environment variables
 .env* 
