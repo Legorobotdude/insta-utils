@@ -39,3 +39,4 @@ config.json # Ignore local changes to configuration file
 
 # Environment variables
 .env* 
+config.json
