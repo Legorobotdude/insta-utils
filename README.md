@@ -1,80 +1,64 @@
 # Instagram Data Analyzer
 
-This Python script analyzes data downloaded from your Instagram account export.
+This Python script analyzes data downloaded from your Instagram account export, primarily focusing on data from the Professional Dashboard export.
 
 ## Features
 
-*   **Unfollower Analysis:** Generates an HTML report (`unfollowers.html`) listing accounts that you follow but do not follow you back. Each username links to their profile.
-*   **Post Metadata Analysis:** Analyzes your `posts_1.json` file to provide insights on posting frequency, media type distribution, caption lengths, and hashtag usage. Generates plots (`.png` files) in an output directory (default: `plots/`).
-*   **Follower Change Tracking:** Compares your current `followers_1.json` against a history file (`follower_history.json` by default) to identify users who have unfollowed or newly followed you since the last check. Updates the history file.
+*   **Dashboard Data Analysis (`dashboard_analyzer.py`):**
+    *   Plots daily trends for Reach, Follows, Visits, Views.
+    *   Analyzes and plots audience demographics (Age/Gender, Top Locations).
+    *   Analyzes detailed post performance (Engagement Rate, Top Posts, Performance by Type).
+    *   Generates a consolidated HTML report embedding all generated plots.
+    *   **Direct LLM Analysis:** Summarizes dashboard data, prompts for page context, and sends the combined information to an OpenAI-compatible API (like LM Studio) to generate personalized analysis and recommendations.
+*   **Standard Export Analysis (`instagram_analyzer.py`):**
+    *   Identifies users you follow who don't follow back.
+    *   Tracks follower gains/losses over time.
 
 ## Prerequisites
 
 *   Python 3
-*   Your Instagram data export, unzipped.
-    *   For `unfollowers` task: `connections/followers_and_following/followers_1.json` and `connections/followers_and_following/following.json`
-    *   For `post_metadata` task: `content/posts_1.json` (adjust path if needed)
-    *   For `track_unfollowers` task: `connections/followers_and_following/followers_1.json`
-*   Python libraries: Install required libraries using pip:
-    ```bash
-    pip install -r requirements.txt
-    ```
+*   Your Instagram data export(s), unzipped.
+    *   `dashboard_analyzer.py` expects CSVs in `dashboard_export/`.
+    *   `instagram_analyzer.py` expects JSONs in `connections/followers_and_following/`.
+*   Python libraries: `pip install -r requirements.txt`
+*   **For LLM Analysis:** An OpenAI-compatible API endpoint running (e.g., LM Studio local server). Note the URL (e.g., `http://localhost:1234/v1`).
 
 ## Usage
 
-Run the script from your terminal, specifying the analysis task you want to perform.
-
-Currently available tasks for `instagram_analyzer.py`:
-
-*   `unfollowers`: Analyzes who you follow that doesn't follow back (from standard data export).
-*   `track_unfollowers`: Compares current followers to history to find changes (from standard data export).
-
-Currently available tasks for `dashboard_analyzer.py`:
-
-*   `plot_reach`: Plots daily reach trend.
-*   `plot_follows`: Plots daily follows trend.
-*   `analyze_audience`: Generates plots for audience demographics (age/gender, top locations).
-*   `analyze_posts`: Analyzes detailed post performance (ER, top posts, performance by type).
-*   `generate_llm_input`: Loads and summarizes Reach, Follows, Audience, and Post Performance data, prompts for user context, and generates a combined text prompt for pasting into an LLM.
-
-**Commands:**
+Run the desired script from your terminal, specifying the task.
 
 ```bash
-# For standard export analysis
-python instagram_analyzer.py <task_name> [options]
-
 # For dashboard export analysis
 python dashboard_analyzer.py <task_name> [options]
+
+# For standard export analysis
+python instagram_analyzer.py <task_name> [options]
 ```
 
+**Key Tasks for `dashboard_analyzer.py`:**
+
+*   `plot_reach`, `plot_follows`, `plot_visits`, `plot_views`: Plot individual daily metrics.
+*   `analyze_audience`: Analyze and plot audience demographics.
+*   `analyze_posts`: Analyze detailed post performance.
+*   `generate_report`: Generate all plots and combine them into an HTML report.
+*   `llm_analyze`: **(Recommended for insights)** Perform all analyses, prompt for context, call LLM API, and print the AI-generated analysis.
+
 **Options for `dashboard_analyzer.py`:**
-*   `--data-dir <directory>`: Specify directory containing dashboard CSVs (default: `dashboard_export`).
-*   `--output-dir <directory>`: Specify output directory for plots (default: `dashboard_plots`).
-*   `--post-file <filename>`: Specify filename for detailed post performance CSV (default: auto-detect).
+*   `--data-dir <directory>`: Specify dashboard CSV directory (default: `dashboard_export`).
+*   `--output-dir <directory>`: Specify plot/report output directory (default: `dashboard_plots`).
+*   `--post-file <filename>`: Specify detailed post performance CSV filename (default: auto-detect).
+*   `--llm-url <URL>`: Set the LLM API endpoint URL (default: `http://localhost:1234/v1`).
+*   `--llm-model <name>`: (Optional) Specify the model name for the API.
+*   `--llm-key <key>`: (Optional) Provide an API key if required.
 
-**Examples (`dashboard_analyzer.py`):**
+**Example (`dashboard_analyzer.py` - LLM Analysis):**
 
-1.  Plot daily reach:
-    ```bash
-    python dashboard_analyzer.py plot_reach
-    ```
-2.  Analyze audience demographics:
-    ```bash
-    python dashboard_analyzer.py analyze_audience
-    ```
-3.  Analyze detailed post performance:
-    ```bash
-    python dashboard_analyzer.py analyze_posts
-    ```
-4.  Generate the combined prompt for LLM analysis:
-    ```bash
-    python dashboard_analyzer.py generate_llm_input
-    ```
+```bash
+# Ensure LM Studio server (or other API endpoint) is running
+python dashboard_analyzer.py llm_analyze --llm-url "http://localhost:1234/v1"
+```
 
-**Outputs (`dashboard_analyzer.py`):**
-*   Plotting tasks: Save `.png` plots to the output directory.
-*   Analysis tasks: Print summaries to the console and may save plots.
-*   `generate_llm_input` task: Prints summaries, asks for context, then prints the final text prompt.
+This will load data, print summaries, ask you for context (niche, goals, etc.), call the specified LLM API, and print the AI's response.
 
 ## Future Enhancements (Roadmap)
 

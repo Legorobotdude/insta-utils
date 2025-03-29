@@ -8,6 +8,30 @@ import csv # Added for manual parsing
 import io # Added for manual parsing
 import re # Ensure re is imported
 import webbrowser # Added for HTML report generation
+import json # Added
+import urllib.request # Added
+import urllib.error # Added
+
+# --- Config Loading ---
+def load_config(config_path):
+    """Loads the JSON configuration file."""
+    try:
+        with open(config_path, 'r', encoding='utf-8') as f:
+            config = json.load(f)
+        if "llm_settings" not in config or "user_context" not in config:
+            print(f"Error: Config file '{config_path}' missing 'llm_settings' or 'user_context' section.")
+            return None
+        print(f"Successfully loaded configuration from {config_path}")
+        return config
+    except FileNotFoundError:
+        print(f"Error: Config file not found at '{config_path}'. Please create it or check the path.")
+        return None
+    except json.JSONDecodeError:
+        print(f"Error: Could not decode JSON from config file '{config_path}'. Check format.")
+        return None
+    except Exception as e:
+        print(f"An unexpected error occurred loading config file '{config_path}': {e}")
+        return None
 
 # --- Data Loading Functions ---
 
@@ -368,83 +392,136 @@ def summarize_audience(audience_data):
         
     return "\n".join(summary)
 
-# --- LLM Prompt Generation ---
+# --- LLM Interaction ---
+def call_llm_api(api_url, messages, model=None, api_key=None, temperature=0.7):
+    """Calls a generic OpenAI-compatible Chat Completions API using urllib."""
+    headers = {
+        "Content-Type": "application/json"
+    }
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    
+    data = {
+        "messages": messages,
+        "temperature": temperature,
+    }
+    if model: # Only include model if specified (some servers use default)
+        data["model"] = model
+        
+    # Convert data payload to JSON bytes
+    json_data = json.dumps(data).encode('utf-8')
+    
+    # Create the request object
+    request = urllib.request.Request(api_url, data=json_data, headers=headers, method='POST')
+    
+    print(f"Sending request to {api_url}...")
+    try:
+        with urllib.request.urlopen(request, timeout=180) as response: # Added timeout (3 mins)
+            response_body = response.read().decode('utf-8')
+            status_code = response.getcode()
+            print(f"API Response Status Code: {status_code}")
+            
+            if 200 <= status_code < 300:
+                response_json = json.loads(response_body)
+                # Extract content from the first choice's message
+                if 'choices' in response_json and response_json['choices']:
+                    first_choice = response_json['choices'][0]
+                    if 'message' in first_choice and 'content' in first_choice['message']:
+                        return first_choice['message']['content'].strip()
+                    else:
+                        print("Error: API response missing 'message' or 'content' in first choice.")
+                        print(f"Response JSON: {response_json}") # Log for debugging
+                        return None
+                else:
+                    print("Error: API response missing 'choices' array or it's empty.")
+                    print(f"Response JSON: {response_json}") # Log for debugging
+                    return None
+            else:
+                 print(f"Error: API returned non-success status {status_code}")
+                 print(f"Response body: {response_body}") # Log error response body
+                 return None
 
-def generate_llm_prompt(data_dir, output_dir):
-    """Loads data, summarizes it, gets user context, and generates an LLM prompt."""
-    print("--- Generating LLM Input Prompt ---")
+    except urllib.error.URLError as e:
+        print(f"Error calling LLM API (URLError): {e}")
+        if hasattr(e, 'reason'): print(f"Reason: {e.reason}")
+        if hasattr(e, 'code'): print(f"HTTP Code: {e.code}")
+        if hasattr(e, 'read'): # Try reading error body if available
+             try: print(f"Error Body: {e.read().decode()}")
+             except: pass
+        return None
+    except json.JSONDecodeError as e:
+        print(f"Error decoding API JSON response: {e}")
+        print(f"Raw response: {response_body}") # Log raw response on JSON error
+        return None
+    except Exception as e:
+        print(f"An unexpected error occurred during LLM API call: {e}")
+        return None
+
+def perform_llm_analysis(config, data_dir, output_dir, post_file_arg):
+    """Loads data, summarizes, uses config context, calls LLM, prints response."""
+    if not config:
+        print("Error: LLM analysis requires a valid configuration.")
+        return
+        
+    print("--- Performing LLM Analysis --- ")
     
-    # --- Load and Summarize Base Metrics ---
-    reach_file = os.path.join(data_dir, 'Reach.csv')
-    follows_file = os.path.join(data_dir, 'Follows.csv')
-    audience_file = os.path.join(data_dir, 'Audience.csv')
-    visits_file = os.path.join(data_dir, 'Visits.csv')
-    views_file = os.path.join(data_dir, 'Views.csv')
-    
-    reach_df = load_timeseries_csv(reach_file, 'Reach')
-    follows_df = load_timeseries_csv(follows_file, 'Follows')
-    audience_data = load_audience_data(audience_file)
-    visits_df = load_timeseries_csv(visits_file, 'Visits')
-    views_df = load_timeseries_csv(views_file, 'Views')
+    # --- Load and Summarize Data --- 
+    print("Loading and summarizing data...")
+    reach_df = load_timeseries_csv(os.path.join(data_dir, 'Reach.csv'), 'Reach')
+    follows_df = load_timeseries_csv(os.path.join(data_dir, 'Follows.csv'), 'Follows')
+    visits_df = load_timeseries_csv(os.path.join(data_dir, 'Visits.csv'), 'Visits')
+    views_df = load_timeseries_csv(os.path.join(data_dir, 'Views.csv'), 'Views')
+    audience_data = load_audience_data(os.path.join(data_dir, 'Audience.csv'))
     
     reach_summary = summarize_timeseries(reach_df, 'Reach')
     follows_summary = summarize_timeseries(follows_df, 'Follows')
-    audience_summary = summarize_audience(audience_data)
     visits_summary = summarize_timeseries(visits_df, 'Visits')
     views_summary = summarize_timeseries(views_df, 'Views')
-    
-    # --- Load and Analyze Post Performance --- 
-    post_summary_text = "Post performance data not available or failed to load."
-    post_perf_file_name = None
-    try:
-        for f in os.listdir(data_dir):
-            if f.endswith('.csv') and re.match(r'^[A-Za-z]{3}-\d{2}-\d{4}_', f):
-                post_perf_file_name = f
-                break
-    except Exception as e:
-        print(f"Warning: Error trying to find post performance file: {e}")
+    audience_summary = summarize_audience(audience_data)
 
+    # Load and analyze post performance
+    post_summary_text = "Post performance data could not be loaded or analyzed."
+    post_perf_file_name = post_file_arg 
+    if not post_perf_file_name:
+         try:
+            for f in os.listdir(data_dir):
+                if f.endswith('.csv') and re.match(r'^[A-Za-z]{3}-\d{2}-\d{4}_', f):
+                    post_perf_file_name = f
+                    break
+         except Exception:
+             pass
     if post_perf_file_name:
         post_perf_file_path = os.path.join(data_dir, post_perf_file_name)
-        print(f"\nLoading post performance data from: {post_perf_file_path}")
         posts_df_raw = load_post_performance_data(post_perf_file_path)
         if posts_df_raw is not None:
-            # Analyze data and print summary
-            posts_df_analyzed, summary_text = analyze_and_summarize_post_performance(posts_df_raw) 
-            if summary_text:
-                 post_summary_text = summary_text
-                 # Optional: Regenerate plot if needed, although analyze_posts task does it.
-                 # plot_filepath = os.path.join(output_dir, 'engagement_rate_by_type.png')
-                 # plot_post_engagement_distribution(posts_df_analyzed, plot_filepath)
-            else:
-                 post_summary_text = "Post performance analysis ran but generated no summary."
-        else:
-            post_summary_text = f"Failed to load post performance data from {post_perf_file_name}."
-    else:
-        post_summary_text = "Could not automatically find the detailed post performance CSV file."
-
-    # Print summaries that will be included
-    print("\n--- Data Summaries --- (will be included in the prompt)")
-    print(reach_summary)
-    print(follows_summary)
-    print(visits_summary)
-    print(views_summary)
-    print(audience_summary)
-    print("\n" + post_summary_text)
-    # TODO: Add summaries for Interactions, Link Clicks, etc. 
+            _, summary = analyze_and_summarize_post_performance(posts_df_raw)
+            if summary: post_summary_text = summary
     
-    # Get user context
-    print("\n--- Please Provide Context About Your Page ---")
-    page_niche = input("1. What is the main topic or niche of your Instagram page? ")
-    page_goals = input("2. What are your primary goals for this page (e.g., grow followers, engagement, website clicks)? ")
-    target_audience_desc = input("3. Describe your ideal target audience (beyond demographics): ")
-    typical_content = input("4. What kind of content do you typically post? ")
-    recent_strategy = input("5. Any specific strategies or changes you've tried recently? (Leave blank if none) ")
+    # --- Get Context from Config --- 
+    user_context = config.get('user_context', {}) 
+    page_niche = user_context.get('page_niche', '<<Niche not specified in config.json>>')
+    page_goals = user_context.get('page_goals', '<<Goals not specified in config.json>>')
+    target_audience_desc = user_context.get('target_audience_desc', '<<Target audience not specified in config.json>>')
+    typical_content = user_context.get('typical_content', '<<Typical content not specified>>')
+    recent_strategy = user_context.get('recent_strategy', '')
     
-    # Construct the prompt
-    prompt = f"""
-Analyze the following Instagram performance data and provide personalized, actionable suggestions for growth. Focus on interpreting the trends and demographics in the context provided.
+    print("\n--- Using Context from Config --- ")
+    print(f"- Niche: {page_niche}")
+    print(f"- Goals: {page_goals}")
+    print(f"- Target Audience: {target_audience_desc}")
+    print(f"- Typical Content: {typical_content}")
+    print(f"- Recent Strategy: {recent_strategy if recent_strategy else 'None specified'}")
 
+    # --- Format Prompt Messages --- 
+    system_message = """
+    You are an expert Instagram growth strategist. Analyze the provided data summary and user context for an Instagram page. 
+    Provide specific, actionable insights and recommendations based *only* on the information given. 
+    Focus on interpreting trends, audience alignment, and post performance to suggest tailored content ideas and strategy adjustments. 
+    Avoid generic advice. Justify your suggestions.
+    Structure your response clearly, perhaps with sections for Observations, Recommendations, and Opportunities.
+    """ 
+
+    user_message_content = f"""
 **Context:**
 - Page Niche: {page_niche}
 - Primary Goals: {page_goals}
@@ -453,33 +530,37 @@ Analyze the following Instagram performance data and provide personalized, actio
 - Recent Strategy/Changes: {recent_strategy if recent_strategy else 'None specified'}
 
 **Data Summary:**
-
 {reach_summary}
-
 {follows_summary}
-
 {visits_summary}
-
 {views_summary}
-
 {audience_summary}
-
 {post_summary_text}
-
-**Request:**
-Based *only* on the provided context and data summary:
-1.  Provide 3-5 key observations about performance trends, audience alignment, and post performance.
-2.  Suggest 3-5 specific, actionable content ideas or strategy adjustments tailored to the page niche, goals, and data (consider top posts, post types, audience).
-3.  Identify potential opportunities or areas for improvement highlighted by the data.
-4.  Avoid generic advice. Be specific and justify suggestions based on the provided information.
 """
-    
+
+    messages = [
+        {"role": "system", "content": system_message.strip()},
+        {"role": "user", "content": user_message_content.strip()}
+    ]
+
+    # --- Call LLM API --- 
+    print("\nCalling LLM API...")
+    llm_settings = config.get('llm_settings', {})
+    api_response_content = call_llm_api(
+        api_url=llm_settings.get('api_url', 'http://localhost:1234/v1/chat/completions'), 
+        messages=messages, 
+        model=llm_settings.get('model'), # Can be None
+        api_key=llm_settings.get('api_key') # Can be None
+    )
+
+    # --- Print Response --- 
     print("\n" + "="*40)
-    print("--- LLM Prompt Ready --- ")
+    print("--- LLM Analysis Result --- ")
     print("="*40)
-    print("Copy the text below and paste it into your preferred LLM interface:")
-    print("-"*40)
-    print(prompt)
+    if api_response_content:
+        print(api_response_content)
+    else:
+        print("Failed to get a response from the LLM API.")
     print("-"*40)
 
 # --- Post Performance Analysis ---
@@ -687,38 +768,45 @@ def generate_full_report(data_dir, output_dir, post_file_arg):
 # --- Main Execution Block ---
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Analyze Instagram Dashboard Export data (CSV files).")
-    # Define tasks
     parser.add_argument(
         "task",
         choices=['plot_reach', 'analyze_audience', 'plot_follows', 
-                 'generate_llm_input', 'analyze_posts',
-                 'plot_visits', 'plot_views', 'generate_report'], # Added generate_report
+                 'analyze_posts', 'plot_visits', 'plot_views', 
+                 'generate_report', 'llm_analyze'], 
         help="The analysis task to perform."
     )
-    # Define common arguments
     parser.add_argument(
-        '--data-dir',
-        default='dashboard_export',
-        help='Directory containing the dashboard export CSV files (default: dashboard_export)'
+        '--data-dir', default='dashboard_export',
+        help='Directory containing the dashboard export CSV files'
     )
     parser.add_argument(
-        '--output-dir',
-        default='dashboard_plots', # Separate plot directory
-        help='Directory to save generated plots (default: dashboard_plots)'
+        '--output-dir', default='dashboard_plots',
+        help='Directory to save generated plots'
     )
-    # Argument for post performance file (since name might vary)
     parser.add_argument(
-        '--post-file',
-        # Attempt to find the file automatically, but allow override
-        default=None, 
-        help='Filename of the detailed post performance CSV within the data-dir (e.g., Mar-01-2025_....csv)'
+        '--post-file', default=None, 
+        help='Filename of the detailed post performance CSV (optional, will try to auto-detect)'
     )
+    # Add config file argument
+    parser.add_argument(
+        '--config', 
+        default='config.json', 
+        help='Path to the JSON configuration file (default: config.json)'
+    )
+    # LLM arguments (--llm-url, etc.) are removed
 
     args = parser.parse_args()
 
-    # Find the post performance file if not specified for relevant tasks
-    # Needs to run earlier now for generate_report
-    post_file_needed = args.task in ['analyze_posts', 'generate_llm_input', 'generate_report']
+    # Load config early if needed by the task
+    config = None
+    if args.task == 'llm_analyze':
+        config = load_config(args.config)
+        if config is None:
+            print("Exiting due to config loading failure.")
+            exit() # Exit if config loading failed for required task
+
+    # Find post file if needed
+    post_file_needed = args.task in ['analyze_posts', 'generate_report', 'llm_analyze']
     if post_file_needed and not args.post_file:
         try:
             for f in os.listdir(args.data_dir):
@@ -731,12 +819,11 @@ if __name__ == "__main__":
                  exit()
         except FileNotFoundError:
              print(f"Error: Data directory '{args.data_dir}' not found.")
-             if args.task == 'analyze_posts': exit() # Only exit if strictly required
+             if args.task == 'analyze_posts': exit() 
         except Exception as e:
              print(f"Error finding post performance file: {e}")
-             if args.task == 'analyze_posts': exit() # Only exit if strictly required
+             if args.task == 'analyze_posts': exit() 
 
-    # Ensure output directory exists
     os.makedirs(args.output_dir, exist_ok=True)
 
     # --- Execute requested task ---
@@ -746,80 +833,52 @@ if __name__ == "__main__":
         data_df = load_timeseries_csv(reach_file, 'Reach')
         if data_df is not None:
             plot_filepath = os.path.join(args.output_dir, 'reach_trend.png')
-            plot_timeseries_trend(data_df, 'Reach', 
-                                    'Instagram Reach Over Time', 'Daily Reach', 
-                                    plot_filepath)
-        else:
-            print("Skipping plot due to data loading errors.")
+            plot_timeseries_trend(data_df, 'Reach', 'Instagram Reach Over Time', 'Daily Reach', plot_filepath)
+        else: print("Skipping plot due to data loading errors.")
         print("Reach plotting complete.")
-
     elif args.task == 'analyze_audience':
         audience_file = os.path.join(args.data_dir, 'Audience.csv')
         print(f"Attempting to analyze audience from {audience_file}...")
         audience_data = load_audience_data(audience_file)
-
         if audience_data:
-            # Plot Age & Gender
             if 'age_gender' in audience_data:
                 plot_filepath = os.path.join(args.output_dir, 'audience_age_gender.png')
                 plot_age_gender(audience_data['age_gender'], plot_filepath)
-            
-            # Plot Top Cities
             if 'top_cities' in audience_data:
                 plot_filepath = os.path.join(args.output_dir, 'audience_top_cities.png')
                 plot_top_locations(audience_data['top_cities'], 'City', plot_filepath)
-
-            # Plot Top Countries
             if 'top_countries' in audience_data:
                 plot_filepath = os.path.join(args.output_dir, 'audience_top_countries.png')
                 plot_top_locations(audience_data['top_countries'], 'Country', plot_filepath)
-        else:
-            print("Could not load audience data for analysis.")
-            
+        else: print("Could not load audience data for analysis.")
         print("Audience analysis complete.")
-
     elif args.task == 'plot_follows':
         follows_file = os.path.join(args.data_dir, 'Follows.csv')
         print(f"Attempting to plot follows from {follows_file}...")
         data_df = load_timeseries_csv(follows_file, 'Follows')
         if data_df is not None:
             plot_filepath = os.path.join(args.output_dir, 'follows_trend.png')
-            plot_timeseries_trend(data_df, 'Follows', 
-                                    'Instagram Daily Follows Over Time', 'Daily Follows', 
-                                    plot_filepath)
-        else:
-             print("Skipping plot due to data loading errors.")
+            plot_timeseries_trend(data_df, 'Follows', 'Instagram Daily Follows Over Time', 'Daily Follows', plot_filepath)
+        else: print("Skipping plot due to data loading errors.")
         print("Follows plotting complete.")
-
     elif args.task == 'plot_visits':
         visits_file = os.path.join(args.data_dir, 'Visits.csv')
         print(f"Attempting to plot visits from {visits_file}...")
         data_df = load_timeseries_csv(visits_file, 'Visits')
         if data_df is not None:
             plot_filepath = os.path.join(args.output_dir, 'visits_trend.png')
-            plot_timeseries_trend(data_df, 'Visits', 
-                                    'Instagram Profile Visits Over Time', 'Daily Visits', 
-                                    plot_filepath)
-        else:
-             print("Skipping plot due to data loading errors.")
+            plot_timeseries_trend(data_df, 'Visits', 'Instagram Profile Visits Over Time', 'Daily Visits', plot_filepath)
+        else: print("Skipping plot due to data loading errors.")
         print("Visits plotting complete.")
-
     elif args.task == 'plot_views':
-        views_file = os.path.join(args.data_dir, 'Views.csv') # Assuming filename is Views.csv
+        views_file = os.path.join(args.data_dir, 'Views.csv')
         print(f"Attempting to plot views from {views_file}...")
         data_df = load_timeseries_csv(views_file, 'Views')
         if data_df is not None:
             plot_filepath = os.path.join(args.output_dir, 'views_trend.png')
-            plot_timeseries_trend(data_df, 'Views', 
-                                    'Instagram Content Views Over Time', 'Daily Views', 
-                                    plot_filepath)
-        else:
-             print("Skipping plot due to data loading errors.")
+            plot_timeseries_trend(data_df, 'Views', 'Instagram Content Views Over Time', 'Daily Views', plot_filepath)
+        else: print("Skipping plot due to data loading errors.")
         print("Views plotting complete.")
-
-    elif args.task == 'generate_llm_input':
-        generate_llm_prompt(args.data_dir, args.output_dir)
-
     elif args.task == 'analyze_posts':
         if not args.post_file:
             print("Error: Post performance file needed for 'analyze_posts' but not found or specified.")
@@ -828,21 +887,21 @@ if __name__ == "__main__":
             print(f"Attempting to analyze post performance from {post_perf_file}...")
             posts_df_raw = load_post_performance_data(post_perf_file)
             if posts_df_raw is not None:
-                # Analyze data and print summary
                 posts_df_analyzed, post_summary = analyze_and_summarize_post_performance(posts_df_raw)
-                # Also generate the plot for this specific task
                 if posts_df_analyzed is not None:
                     plot_filepath = os.path.join(args.output_dir, 'engagement_rate_by_type.png')
                     plot_post_engagement_distribution(posts_df_analyzed, plot_filepath)
             else:
                 print("Skipping analysis due to data loading errors.")
             print("Post performance analysis complete.")
-        
     elif args.task == 'generate_report':
          generate_full_report(args.data_dir, args.output_dir, args.post_file)
+    
+    elif args.task == 'llm_analyze':
+         # Config should have been loaded earlier
+         perform_llm_analysis(config, args.data_dir, args.output_dir, args.post_file)
 
     else:
-        # Should not be reachable with choices defined
         print(f"Error: Unknown task '{args.task}'")
         parser.print_help()
 
