@@ -1,0 +1,3 @@
+Please place the CSV files downloaded from your Instagram Professional Dashboard export function into this directory.
+
+The analysis script expects files like Reach.csv, Audience.csv, Follows.csv, etc., to be present here. 

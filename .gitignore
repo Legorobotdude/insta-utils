@@ -32,6 +32,9 @@ unfollowers.html
 connections/
 *.png
 follower_history.json
+dashboard_plots/
+dashboard_export/*.csv
+!dashboard_export/placeholder.txt
 
 # Environment variables
 .env* 

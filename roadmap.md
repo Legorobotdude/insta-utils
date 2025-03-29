@@ -74,4 +74,24 @@ This document outlines potential approaches for analyzing Instagram content perf
 3.  **Consider ML for Prediction/Importance:** If desired, use ML (Scikit-learn) with features from steps 1 & 2 to find predictive factors.
 4.  **Deep Learning as an Advanced Option:** Only if specific complex needs justify the overhead.
 
-**Overall Flow:** Parse Data -> Statistical Analysis & Viz -> LLM for Text Analysis -> (Optional) ML for Predictive Insights. 
+**Overall Flow:** Parse Data -> Statistical Analysis & Viz -> LLM for Text Analysis -> (Optional) ML for Predictive Insights.
+
+## Follower Segmentation (Based on Engagement)
+
+*   **Goal:** Segment existing followers based on their engagement patterns (likes, comments) with your content using clustering algorithms.
+*   **Feasibility:** High. Uses standard data science techniques on data available in the Instagram download.
+*   **Data Needed:**
+    *   Follower list (`followers_1.json`)
+    *   Likes data (e.g., `likes/media_likes.json`)
+    *   Comments data (e.g., `comments/post_comments.json`)
+*   **Methodology:**
+    1.  Load followers, likes, and comments data.
+    2.  Aggregate likes/comments per follower username.
+    3.  Join aggregated data with the follower list.
+    4.  Create numerical features (e.g., `total_likes`, `total_comments`).
+    5.  Scale features.
+    6.  Apply clustering (e.g., K-means) to group followers.
+    7.  Analyze cluster characteristics (e.g., identify high-engagement group).
+*   **How:** Python libraries `pandas` (data manipulation), `scikit-learn` (scaling, clustering).
+*   **Pros:** Leverages existing data, provides actionable insights into audience behavior, no scraping/ToS issues.
+*   **Status:** Tabled for now, requires locating and processing like/comment files. 
