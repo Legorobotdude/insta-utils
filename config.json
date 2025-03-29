@@ -1,0 +1,14 @@
+{
+  "llm_settings": {
+    "api_url": "http://localhost:1234/v1",
+    "model": null,
+    "api_key": null
+  },
+  "user_context": {
+    "page_niche": "<<Replace with your page niche (e.g., Sci-fi digital art, Python tutorials)>>",
+    "page_goals": "<<Replace with your primary goals (e.g., Increase follower count, Drive website traffic, Improve engagement rate)>>",
+    "target_audience_desc": "<<Replace with a description of your ideal audience (e.g., Developers interested in AI, Fans of cyberpunk aesthetics, etc.)>>",
+    "typical_content": "<<Replace with the types of content you usually post (e.g., AI-generated images, Code snippets, Personal photos, Behind-the-scenes videos)>>",
+    "recent_strategy": "<<Replace with any recent strategy changes or leave blank>>"
+  }
+} 
